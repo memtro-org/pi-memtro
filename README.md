@@ -41,13 +41,52 @@ The package also registers Memtro's MCP server, so `memtro_search`, `memtro_reme
 
 Set `MEMTRO_PI_TOOLS=0` if you want Memtro as the model and nothing else.
 
+## More than one account
+
+A consultant with two clients, a sandbox beside production, a self-hosted Memtro next to the hosted one. Declare them in `<agent-dir>/memtro.json` (that is `~/.pi/agent/memtro.json` unless `PI_CODING_AGENT_DIR` says otherwise):
+
+```json
+{
+  "accounts": [
+    { "id": "acme",   "name": "Memtro (Acme)",   "keyEnv": "MEMTRO_API_KEY" },
+    { "id": "client", "name": "Memtro (Client)", "keyEnv": "CLIENT_MEMTRO_KEY",
+      "baseUrl": "https://memtro.client.internal",
+      "limit": { "context": 128000, "output": 16000 } }
+  ]
+}
+```
+
+Each account becomes its own provider and its own MCP server, so `/model` shows which account a model belongs to and tools arrive namespaced by it:
+
+```
+memtro         auto:chat    200K  32K     <- the first account
+memtro-client  auto:chat    128K  16K     <- the second, with its own window
+```
+
+| Field | Required | What it is |
+|---|---|---|
+| `id` | yes | Letters, digits, `-` and `_`. Becomes the provider suffix. |
+| `keyEnv` | no | The environment variable holding that account's key. Default `MEMTRO_API_KEY`. |
+| `name` | no | What `/model` shows. Default `Memtro (<id>)`. |
+| `baseUrl` | no | For a self-hosted Memtro. Default `https://platform.memtro.com`. |
+| `limit` | no | `context` and `output` for this account's ladder, overriding the global defaults. |
+| `tools` | no | `false` registers the provider without the MCP server. |
+
+**Keys stay out of the file.** An account names an environment variable; it never carries a credential. A config full of keys is a config that ends up in a backup or a dotfiles repository. Pi resolves `$NAME` itself when it builds a request, so the key reaches the provider without this extension holding it; the one place it is read is model discovery, which has to make the call itself and sends it only to that account's host.
+
+**The first account keeps the bare `memtro`.** Deliberate rather than tidy: a single-account setup names `memtro/auto:chat` in its config and on its command line, and adding a second account should not quietly rename the first one's models out from under it.
+
+**With no file, nothing changes.** One implicit account from `MEMTRO_API_KEY`, exactly as before. A file that will not parse falls back to the same thing and says so in `/memtro` rather than refusing to load — an extension that throws takes Pi's whole startup with it, and "my coding agent will not start" is worse than "my second account is missing".
+
+Two ids differing only in `-` versus `_` are the same server to Pi, so the second is skipped and `/memtro` names both.
+
 ## Check it
 
 ```
 /memtro
 ```
 
-Reports the host, whether the key works, how many models it offers and where the tools are. It is the first thing to run when something is not working, because it is nearly always one of three things: no key, a key the server will not take, or a host that is not the one you meant.
+Reports one line per account: the host, whether that account's key works, how many models it offers and whether its tools are on. With two accounts the usual mistake is the right key against the wrong one, which shows as a 401 on one line and nothing wrong on the others. It is the first thing to run when something is not working, because it is nearly always one of three things: no key, a key the server will not take, or a host that is not the one you meant.
 
 ## Settings
 
@@ -70,7 +109,7 @@ Image input is off by default because the listing does not say which models are 
 
 ## Trust
 
-A Pi extension runs inside the Pi process with your permissions, so install it from somewhere you trust — including this one. What this package does: registers a provider and an MCP server, and reads `MEMTRO_API_KEY` to fetch your model list from the host you configured. It makes no other network call, writes no files, and starts no processes. It is about 150 lines; read [`src/extension.ts`](src/extension.ts).
+A Pi extension runs inside the Pi process with your permissions, so install it from somewhere you trust — including this one. What this package does: reads `<agent-dir>/memtro.json` if it is there, registers a provider and an MCP server per account, and reads each account's named key variable to fetch its model list from the host that account configured. It makes no other network call, writes no files, and starts no processes. Read [`src/extension.ts`](src/extension.ts).
 
 ## Licence
 
