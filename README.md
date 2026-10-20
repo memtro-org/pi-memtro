@@ -59,9 +59,11 @@ A consultant with two clients, a sandbox beside production, a self-hosted Memtro
 Each account becomes its own provider and its own MCP server, so `/model` shows which account a model belongs to and tools arrive namespaced by it:
 
 ```
-memtro         auto:chat    200K  32K     <- the first account
-memtro-client  auto:chat    128K  16K     <- the second, with its own window
+memtro-acme    auto:chat    200K  32K
+memtro-client  auto:chat    128K  16K     <- its own window
 ```
+
+Pi's picker builds each row from the model id and the **provider** id and nothing else — `model.name` is not shown there — so the provider id is the only thing on screen that says which account a model belongs to. That is why all of them are suffixed once there is more than one account, including the first. With a single account there is nothing to distinguish, so it stays the short `memtro`.
 
 | Field | Required | What it is |
 |---|---|---|
@@ -74,7 +76,9 @@ memtro-client  auto:chat    128K  16K     <- the second, with its own window
 
 **Keys stay out of the file.** An account names an environment variable; it never carries a credential. A config full of keys is a config that ends up in a backup or a dotfiles repository. Pi resolves `$NAME` itself when it builds a request, so the key reaches the provider without this extension holding it; the one place it is read is model discovery, which has to make the call itself and sends it only to that account's host.
 
-**The first account keeps the bare `memtro`.** Deliberate rather than tidy: a single-account setup names `memtro/auto:chat` in its config and on its command line, and adding a second account should not quietly rename the first one's models out from under it.
+**A single account keeps the bare `memtro`; two or more are all suffixed.** An earlier version kept `memtro` for the first account whatever the count, so that adding a second would not rename the first one's models. It read badly where it mattered: the account most people use was the one row in the picker with no label on it, and two accounts were told apart by one of them being unmarked. Continuity is worth a config edit; it is not worth an unreadable picker. So the short name survives exactly where it is unambiguous and disappears the moment there is a second thing it could mean.
+
+The `memtro-` prefix stays on purpose. `registerProvider` overrides a built-in of the same name, so an account called `anthropic` would quietly replace Pi's own Anthropic provider; the prefix is what makes that impossible.
 
 **With no file, nothing changes.** One implicit account from `MEMTRO_API_KEY`, exactly as before. A file that will not parse falls back to the same thing and says so in `/memtro` rather than refusing to load — an extension that throws takes Pi's whole startup with it, and "my coding agent will not start" is worse than "my second account is missing".
 

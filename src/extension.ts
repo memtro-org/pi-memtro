@@ -47,9 +47,22 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  *     ]
  *   }
  *
- * The first account registers as `memtro`, the rest as `memtro-<id>`. That is deliberate rather than tidy: an
- * existing single-account setup names `memtro/auto:chat` in its config and on its command line, and adding a
- * second account should not quietly rename the first one's models out from under it.
+ * One account registers as `memtro`. Two or more register as `memtro-<id>`, every one of them including the
+ * first, and that asymmetry is the point.
+ *
+ * Pi's model picker builds each row as the model id and the *provider* id and nothing else:
+ *
+ *     const modelText = item.id;
+ *     const providerBadge = theme.fg("muted", `[${item.provider}]`);
+ *
+ * `model.name` is never shown there. So the provider id is the only thing on screen that can say which account a
+ * model belongs to, and the first version of this kept `memtro` bare for the first account to avoid renaming an
+ * existing setup's models. The result was that the account most people use was the one row in the picker with no
+ * label on it, and two accounts were told apart by one of them being unmarked. Continuity is worth a config edit;
+ * it is not worth an unreadable picker.
+ *
+ * So the bare name survives exactly where it is unambiguous — a single account, which is every setup
+ * that has not opted into more — and disappears the moment there is a second thing it could mean.
  *
  * With no file, there is one implicit account from `MEMTRO_API_KEY` — which is exactly what this did before.
  *
@@ -184,8 +197,8 @@ export function readAccounts(dir = agentDir()): { accounts: Account[]; problems:
     const limit = entry.limit ?? {};
     accounts.push({
       id,
-      // The first account keeps the bare `memtro` so an existing setup's model ids go on meaning what they meant.
-      provider: accounts.length === 0 ? "memtro" : `memtro-${id}`,
+      // Filled in below once the count is known: the bare `memtro` only where there is one account to mean.
+      provider: `memtro-${id}`,
       label: typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : `Memtro (${id})`,
       host: trimHost(typeof entry.baseUrl === "string" && entry.baseUrl.trim() ? entry.baseUrl.trim() : process.env.MEMTRO_BASE_URL || DEFAULT_HOST),
       keyEnv,
@@ -196,17 +209,28 @@ export function readAccounts(dir = agentDir()): { accounts: Account[]; problems:
   }
 
   if (accounts.length === 0) return { accounts: [envAccount()], problems: [...problems, `no usable account in ${path}; using ${DEFAULT_KEY_VAR} alone`] };
+  // One account has nothing to be distinguished from, so it keeps the short name an existing setup already names
+  // in its config. More than one and every provider id carries its account, because that id is the only part of
+  // a picker row that can say which account the model belongs to.
+  if (accounts.length === 1) accounts[0]!.provider = "memtro";
   return { accounts, problems };
 }
 
 const apiBase = (a: Account): string => `${a.host}/v1`;
 const mcpUrl = (a: Account): string => `${a.host}/api/mcp`;
 
-function chatModel(a: Account, id: string, name: string) {
+/**
+ * `what` describes the model; the account's name is prepended here rather than by the caller.
+ *
+ * Pi's picker shows the model id and the provider id, so this name is for the line that reports the *selected*
+ * model. The first version let each call site compose it, and the discovered models — which is nearly all of
+ * them — ended up with no account in their name at all, while the three hard-coded ones had it.
+ */
+function chatModel(a: Account, id: string, what: string) {
   return {
     type: "chat" as const,
     id,
-    name,
+    name: `${a.label}: ${what}`,
     reasoning: true,
     thinkingLevelMap: THINKING,
     input: inputs(),
@@ -219,9 +243,9 @@ function chatModel(a: Account, id: string, name: string) {
 /** What is offered before (or instead of) discovery: the routing ids, which every organisation has. */
 function baseModels(a: Account) {
   return [
-    chatModel(a, "auto:chat", `${a.label} auto (one reply)`),
-    chatModel(a, "auto:agent", `${a.label} auto (multi-step agent)`),
-    chatModel(a, "memtro:chat", `${a.label} default model (one reply)`),
+    chatModel(a, "auto:chat", "auto (one reply)"),
+    chatModel(a, "auto:agent", "auto (multi-step agent)"),
+    chatModel(a, "memtro:chat", "default model (one reply)"),
   ];
 }
 
@@ -247,7 +271,7 @@ async function discover(a: Account, signal?: AbortSignal) {
     const ids = (body.data ?? []).map((row) => row.id).filter((id): id is string => typeof id === "string" && id.length > 0);
     if (ids.length === 0) return baseModels(a);
 
-    const models = [chatModel(a, "auto:chat", `${a.label} auto (one reply)`), chatModel(a, "auto:agent", `${a.label} auto (multi-step agent)`)];
+    const models = [chatModel(a, "auto:chat", "auto (one reply)"), chatModel(a, "auto:agent", "auto (multi-step agent)")];
     const taken = new Set(models.map((m) => m.id));
     for (const id of ids) {
       const chatId = id.endsWith(":chat") || id.endsWith(":agent") ? id : `${id}:chat`;
