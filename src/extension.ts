@@ -100,10 +100,24 @@ const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
 const inputs = (): ("text" | "image")[] => (process.env.MEMTRO_IMAGE_INPUT === "1" ? ["text", "image"] : ["text"]);
 
 /**
- * Pi's seven thinking levels onto the two Memtro reads from `reasoning_effort`: low and medium ask for standard
- * reasoning, high and above ask for deep. Mapped explicitly so the top two levels are not silently dropped.
+ * Thinking is Memtro's to decide, not Pi's, and the reason is a bug this extension caused.
+ *
+ * Declaring `reasoning: true` makes Pi send `reasoning_effort` on every request. Memtro reads that and asks the
+ * provider for extended thinking — for Anthropic, `{ thinking: { type: "adaptive" }, effort: "high" }`,
+ * which has no budget of its own. Pi also sends `max_completion_tokens` from the `limit.output` declared here, and
+ * on Anthropic the thinking and the answer **share** that one allowance. Pi says so in its own request builder:
+ * "an uncapped reasoning phase can consume the whole response and leave no answer and no tool call."
+ *
+ * Which is what happened. Two requests on 21 October: a 64,000-token prompt, `max_completion_tokens` of 32,000,
+ * and `output_tokens` of **one**, finishing on `length`. Pi reported "Response was truncated before completion",
+ * correctly, and the truncated thing was the entire answer.
+ *
+ * So these models are declared without reasoning. Memtro still thinks as hard as it judges necessary " + DASH + "
+ * it applies deep thinking in agent mode on its own account, where it also controls the output budget " + DASH + "
+ * and the request from here no longer asks for thinking while capping the room it would need. The cost is that
+ * Pi's thinking-level control does nothing for a Memtro model, which is honest: the level was never Pi's to set
+ * through a gateway that re-decides it per request.
  */
-const THINKING = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" } as const;
 
 /** One Memtro account, resolved. `provider` is what Pi addresses its models by. */
 interface Account {
@@ -231,8 +245,7 @@ function chatModel(a: Account, id: string, what: string) {
     type: "chat" as const,
     id,
     name: `${a.label}: ${what}`,
-    reasoning: true,
-    thinkingLevelMap: THINKING,
+    reasoning: false,
     input: inputs(),
     cost: NO_COST,
     contextWindow: a.contextWindow,

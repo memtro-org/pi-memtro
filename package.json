@@ -1,6 +1,6 @@
 {
   "name": "pi-memtro",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Memtro for Pi: your company's memory as the model, and its connected systems as tools.",
   "keywords": [
     "pi-package",

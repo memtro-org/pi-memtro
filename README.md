@@ -103,6 +103,16 @@ Reports one line per account: the host, whether that account's key works, how ma
 | `MEMTRO_MAX_TOKENS` | `32000` | See below. |
 | `MEMTRO_IMAGE_INPUT` | off | `1` declares image input on every Memtro model. |
 
+### Thinking is Memtro's to decide
+
+These models are declared without reasoning, so Pi's thinking-level control does nothing for them. That is deliberate, and it fixed a bug this extension caused.
+
+`reasoning: true` makes Pi send `reasoning_effort` on every request. Memtro reads it and asks the provider for extended thinking — on Anthropic, adaptive thinking at high effort, which has no budget of its own. Pi also sends `max_completion_tokens` from the `limit.output` declared here, and on Anthropic the thinking and the answer **share** that one allowance. Pi's own request builder says so: *"an uncapped reasoning phase can consume the whole response and leave no answer and no tool call."*
+
+Which is what happened: a 64,000-token prompt, a 32,000 output allowance, and `output_tokens` of **one**, finishing on `length`. Pi reported "Response was truncated before completion", and the truncated thing was the whole answer.
+
+Memtro still thinks as hard as it judges necessary — it applies deep thinking in agent mode on its own account, where it also controls the output budget. The request from here simply no longer asks for thinking while capping the room it would need.
+
 ### What is a default here and what is a fact
 
 Memtro's `/v1/models` reports model ids and nothing else — no context window, no output limit, no prices — and Pi needs all three. So the window and output limit are defaults chosen for the models Memtro usually routes to, not facts read from the endpoint. If yours are different, set them.
