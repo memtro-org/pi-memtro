@@ -84,6 +84,16 @@ The `memtro-` prefix stays on purpose. `registerProvider` overrides a built-in o
 
 Two ids differing only in `-` versus `_` are the same server to Pi, so the second is skipped and `/memtro` names both.
 
+## What it tells Memtro about your session
+
+Two things the client knows and the OpenAI wire has no field for, sent automatically:
+
+**The repository**, read from `.git/config` where Pi was started. Memtro holds hundreds of repository nodes, and a coding agent sends files, diffs and shell output from one of them; without being told which, "the retry logic" ranks by phrasing across every repository your organisation has connected. Nothing to configure — if you are in a git checkout with an origin, it is sent as `owner/name`. Memtro ignores a repository it has never heard of rather than creating one.
+
+**A session id**, so your turns are counted together and a repeated question reuses the retrieval it already paid for instead of re-embedding and re-ranking on every tool call. It is per Pi process, which is close enough to per session and honest about it: switching sessions without restarting keeps the same id, which makes a cost total slightly wide and nothing else.
+
+Both ride in `samplingParams`, which Pi merges into the request body — the supported way for a client to send a provider something the wire has no field for. Neither contains anything but the repository name and a random id.
+
 ## Check it
 
 ```

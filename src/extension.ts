@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
@@ -118,6 +119,61 @@ const inputs = (): ("text" | "image")[] => (process.env.MEMTRO_IMAGE_INPUT === "
  * Pi's thinking-level control does nothing for a Memtro model, which is honest: the level was never Pi's to set
  * through a gateway that re-decides it per request.
  */
+
+/**
+ * The repository this session is working in, as `owner/name`, from the git remote.
+ *
+ * Memtro holds 216 repository nodes and a coding agent used to send it files, diffs and shell output from one of
+ * them while saying nothing about which, so "the retry logic" ranked by phrasing across every repository the
+ * organisation had ever connected. The client knows the answer and has always known it.
+ *
+ * Read from `.git/config` rather than by running git. The factory must not spawn processes — Pi says so, and a
+ * coding agent's startup is not the place for a subprocess — and the file is three lines of ini.
+ */
+export function gitProject(from: string): string | null {
+  for (let dir = from; ; dir = dirname(dir)) {
+    const config = join(dir, ".git", "config");
+    if (existsSync(config)) {
+      try {
+        const url = /\[remote "origin"\][^[]*?\n\s*url\s*=\s*(\S+)/.exec(readFileSync(config, "utf8"))?.[1];
+        return url ? ownerRepo(url) : null;
+      } catch {
+        return null;
+      }
+    }
+    const parent = dirname(dir);
+    // A worktree or a submodule has `.git` as a file rather than a directory; neither is worth chasing here, and
+    // the walk stops at the filesystem root either way.
+    if (parent === dir) return null;
+  }
+}
+
+/** `owner/name` from any of the spellings a remote comes in. Null for anything that is not one. */
+export function ownerRepo(url: string): string | null {
+  const cleaned = url.trim().replace(/\.git$/, "");
+  // scp-style (`git@host:owner/name`), then any URL form (`https://`, `ssh://`, `git://`).
+  const scp = /^[^@/]+@[^:]+:(.+)$/.exec(cleaned);
+  const path = scp ? scp[1]! : cleaned.replace(/^[a-z+]+:\/\/[^/]*\//i, "");
+  const parts = path.split("/").filter(Boolean);
+  return parts.length >= 2 ? `${parts.at(-2)}/${parts.at(-1)}` : null;
+}
+
+/**
+ * An id for this run, so Memtro can count a session's turns together and reuse a retrieval between them.
+ *
+ * Per process, which is close enough to per session and honest about it: Pi can switch sessions without
+ * restarting, and this id would not change. Over-grouping costs a slightly wide cost total and nothing else — the
+ * retrieval cache is keyed on the question as well, so a stale session can only ever reuse an answer to the same
+ * question.
+ *
+ * The alternative was re-registering the providers on `session_start` to carry `getSessionName()`, which replaces
+ * a provider's model list and would empty the picker of everything discovery had found until somebody opened
+ * `/model` again. A precise id is not worth that.
+ */
+const SESSION_ID = `pi-${randomBytes(6).toString("hex")}`;
+
+/** The repository Pi was started in, resolved once: the working directory does not change under a run. */
+const PROJECT = gitProject(process.cwd());
 
 /** One Memtro account, resolved. `provider` is what Pi addresses its models by. */
 interface Account {
@@ -240,11 +296,22 @@ const mcpUrl = (a: Account): string => `${a.host}/api/mcp`;
  * model. The first version let each call site compose it, and the discovered models — which is nearly all of
  * them — ended up with no account in their name at all, while the three hard-coded ones had it.
  */
+/**
+ * What rides along on every request to this account.
+ *
+ * `samplingParams` is merged into the request body by Pi, and Memtro reads its options from the body's top level,
+ * so this is how a client tells it things the OpenAI wire has no field for.
+ */
+function memtroOptions(project: string | null): Record<string, unknown> {
+  return { memtro: { session: SESSION_ID, ...(project ? { project } : {}) } };
+}
+
 function chatModel(a: Account, id: string, what: string) {
   return {
     type: "chat" as const,
     id,
     name: `${a.label}: ${what}`,
+    samplingParams: memtroOptions(PROJECT),
     reasoning: false,
     input: inputs(),
     cost: NO_COST,
